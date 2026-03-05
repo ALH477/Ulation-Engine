@@ -23,7 +23,7 @@ import Data.Time.Clock
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import DeMoDNote.Types
 import DeMoDNote.Config hiding (defaultConfig)
-import DeMoDNote.Backend (DetectionEvent(..), JackStatus(..))
+import DeMoDNote.Backend (DetectionEvent(..))
 import DeMoDNote.Util (safeIndex, safeTail, clamp, chunksOf)
 
 -- ─────────────────────────────────────────────────────────────────────────────

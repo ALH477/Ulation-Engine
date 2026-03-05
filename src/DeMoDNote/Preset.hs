@@ -34,8 +34,7 @@ import Control.Monad (forM)
 import System.Directory (createDirectoryIfMissing, doesFileExist, doesDirectoryExist, getHomeDirectory, removeFile, listDirectory)
 import System.FilePath ((</>))
 import DeMoDNote.Config
-import DeMoDNote.Scale (Scale, ScaleType(..), NoteName(..), makeScale)
-import DeMoDNote.Arpeggio (Arpeggio, ArpeggioPattern, createArpeggio, majorChord, minorChord)
+import DeMoDNote.Scale (ScaleType(..), NoteName(..))
 import DeMoDNote.BPM (BPMMode(..), QuantizationGrid(..), TimeSignature(..))
 
 -- Built-in preset types

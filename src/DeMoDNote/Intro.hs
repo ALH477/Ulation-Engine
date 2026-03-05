@@ -19,6 +19,7 @@ module DeMoDNote.Intro
     , timeToDepthAndChar
     ) where
 
+import Data.Bits ((.&.))
 import Data.Time.Clock   (UTCTime, utctDayTime)
 import Data.Time.LocalTime (timeToTimeOfDay, todHour, todMin, todSec)
 

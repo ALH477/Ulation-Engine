@@ -238,7 +238,6 @@ writeToRingBuffer audioState buf n = do
 
 data AudioState = AudioState
     { audioRingBuffer :: !AudioRingBuffer
-    , sampleCounter   :: !(TVar Word64)
     , running         :: !(TVar Bool)
     , currentNote     :: !(TVar (Maybe (Int, Int)))
     , lastConfidence  :: !(TVar Double)
@@ -254,18 +253,17 @@ data AudioState = AudioState
 newAudioState :: Int -> IO AudioState
 newAudioState ringSize = do
     rb <- newAudioRingBuffer ringSize
-    counter <- newTVarIO 0
     run <- newTVarIO True
     note <- newTVarIO Nothing
     conf <- newTVarIO 0.0
     lat <- newTVarIO 0.0
     wave <- newTVarIO []
     osc <- newTVarIO Nothing
-    sr <- newTVarIO 44100
+    sr <- newTVarIO 96000
     bs <- newTVarIO 256
     xruns <- newIORef 0
     sem <- newEmptyMVar
-    return $ AudioState rb counter run note conf lat wave osc sr bs xruns sem
+    return $ AudioState rb run note conf lat wave osc sr bs xruns sem
 
 cfloatToInt16 :: CFloat -> Int16
 cfloatToInt16 (CFloat f) = round (max (-1.0) (min 1.0 f) * 32767)
@@ -429,7 +427,7 @@ processFrame cfg audioState jackState stateVar = do
     let samplesInt = VS.map fromIntegral samplesVec :: VS.Vector Int
 
     when (VS.length samplesVec >= 128) $ do
-        currentTime <- getMicroTime
+        frameTime <- getMicroTime
 
         let !samplesD = VS.map (\x -> fromIntegral x / 32768.0 :: Double) samplesVec
             !waveform = VS.toList samplesD
@@ -442,7 +440,7 @@ processFrame cfg audioState jackState stateVar = do
             prevPLL          = pllStateMach   prevRS
             prevOnset        = onsetFeatures  prevRS
 
-        result <- detect cfg samplesInt currentTime prevNoteState prevPLL prevOnset
+        result <- detect cfg samplesInt frameTime prevNoteState prevPLL prevOnset
 
         let (detTuningNote, detTuningCents) = case detectedNote result of
                 Nothing        -> (Nothing, 0.0)
@@ -467,7 +465,7 @@ processFrame cfg audioState jackState stateVar = do
               , noteStateMach       = noteState result
               , pllStateMach        = pllState  result   -- persist PLL state
               , onsetFeatures       = onsetState result  -- persist onset features
-              , lastOnsetTime       = currentTime
+              , lastOnsetTime       = frameTime
               , config              = cfg
               , reactorBPM          = prevRS `seq` reactorBPM prevRS -- preserve tap BPM
               , reactorThreshold    = reactorThreshold prevRS
@@ -489,7 +487,7 @@ processFrame cfg audioState jackState stateVar = do
                          detTuningNote detTuningCents detTuningInTune
 
 handleNoteChange :: AudioState -> Maybe (MIDINote, Velocity) -> NoteState -> Maybe Int -> Double -> Bool -> IO ()
-handleNoteChange audioState mNote noteState detTuningNote detTuningCents detTuningInTune = do
+handleNoteChange audioState mNote _noteState _detTuningNote _detTuningCents _detTuningInTune = do
     curr    <- atomically $ readTVar (currentNote audioState)
     mClient <- atomically $ readTVar (oscClient   audioState)   -- read once
     let sendOn  n v = case mClient of
@@ -541,8 +539,8 @@ runBackend cfg state mSynthManager = do
     case mSynthManager of
         Nothing -> logInfo "FluidSynth: disabled"
         Just sm -> do
-            running <- isFluidSynthRunning sm
-            if running
+            synthRunning <- isFluidSynthRunning sm
+            if synthRunning
                 then logInfo "FluidSynth: connected and ready"
                 else logInfo "FluidSynth: not running"
     
@@ -563,7 +561,7 @@ runBackend cfg state mSynthManager = do
             Just sm -> void $ try @SomeException $ stopFluidSynth sm
         ) Nothing
     
-    forkIO $ forever $
+    _ <- forkIO $ forever $
         jackLoop cfg audioState jackState state
             `catch` (\(e :: SomeException) -> do
                 logErr $ "jackLoop crashed: " ++ show e

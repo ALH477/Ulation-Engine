@@ -130,7 +130,7 @@ stopRecording rec = do
 
 toggleRecording :: RecordingState -> IO RecordingState
 toggleRecording rec
-    | recEnabled rec = fst <$> stopRecording rec
+    | recEnabled rec = snd <$> stopRecording rec
     | otherwise      = startRecording rec
 
 getTimestamp :: UTCTime -> Word64

@@ -32,7 +32,7 @@ module DeMoDNote.OSC (
 
 import Sound.Osc
 import Sound.Osc.Datum
-import Network.Socket hiding (send, recv)
+import Network.Socket
 import Network.Socket.ByteString (sendTo)
 import qualified Data.ByteString.Lazy as BL
 import Control.Concurrent.STM
@@ -45,7 +45,6 @@ import Sound.Osc.Transport.Fd.Udp (Udp(..), with_udp, udpServer)
 import System.IO (hPutStrLn, stderr)
 
 import DeMoDNote.Preset
-import DeMoDNote.Config (Config)
 import DeMoDNote.Types
 
 -- ─────────────────────────────────────────────────────────────────────────────

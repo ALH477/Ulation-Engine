@@ -31,6 +31,8 @@ module DeMoDNote.BPM (
     -- Utility functions
     msToSamples,
     samplesToMs,
+    msToSamplesSR,
+    samplesToMsSR,
     beatToMs,
     msToBeat,
     swingOffset,
@@ -288,7 +290,7 @@ autoDetectBPM state onsets =
                 clampedBPM = max minBPM (min maxBPM roundedBPM)
             
             -- Calculate confidence based on consistency
-            let variance = sum (map (\b -> (b - avgBPM)^2) bpms) / fromIntegral (length bpms) :: Double
+            let variance = sum (map (\b -> (b - avgBPM) * (b - avgBPM)) bpms) / fromIntegral (length bpms) :: Double
                 conf = max 0.0 (1.0 - variance / 100.0 :: Double) :: Double
             
             atomically $ do
@@ -309,14 +311,23 @@ swingOffset state beatNum = do
        then 0.0
        else swingAmt * 0.5  -- Delay odd beats for swing feel
 
--- | Convert milliseconds to sample frames at the given sample rate.
--- e.g. msToSamples 44100 10.0 = 441
-msToSamples :: Int -> Double -> Int
-msToSamples sr ms = round (ms * fromIntegral sr / 1000.0)
+-- | Convert milliseconds to sample frames (assumes 96000 Hz).
+-- Use 'msToSamplesSR' when the sample rate is known.
+msToSamples :: Double -> Int
+msToSamples ms = round (ms * 96.0)
 
--- | Convert sample frames back to milliseconds at the given sample rate.
-samplesToMs :: Int -> Int -> Double
-samplesToMs sr samples = fromIntegral samples * 1000.0 / fromIntegral sr
+-- | Convert sample frames to milliseconds (assumes 96000 Hz).
+-- Use 'samplesToMsSR' when the sample rate is known.
+samplesToMs :: Int -> Double
+samplesToMs samples = fromIntegral samples / 96.0
+
+-- | Convert milliseconds to sample frames at an explicit sample rate.
+msToSamplesSR :: Int -> Double -> Int
+msToSamplesSR sr ms = round (ms * fromIntegral sr / 1000.0)
+
+-- | Convert sample frames to milliseconds at an explicit sample rate.
+samplesToMsSR :: Int -> Int -> Double
+samplesToMsSR sr samples = fromIntegral samples * 1000.0 / fromIntegral sr
 
 -- Convert beat number to milliseconds
 beatToMs :: Double -> Double -> Double

@@ -3,9 +3,6 @@ module DeMoDNote.OSCSpec where
 import Test.Hspec
 import Test.QuickCheck
 import DeMoDNote.OSC
-import Sound.Osc
-import Sound.Osc.Datum
-import Data.Int (Int32)
 
 spec :: Spec
 spec = do

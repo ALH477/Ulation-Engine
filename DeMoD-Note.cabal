@@ -1,6 +1,6 @@
 cabal-version: 3.0
 name:               DeMoD-Note
-version:            1.0.1
+version:            1.0.2
 synopsis:           Deterministic Monophonic Note Detector
 license:            MIT
 author:             ALH477 (Asher LeRoy)
@@ -24,6 +24,7 @@ library
     DeMoDNote.OSC
     DeMoDNote.Error
     DeMoDNote.Monitor
+    DeMoDNote.Intro 
     DeMoDNote.Recording
     DeMoDNote.Export
     DeMoDNote.Scale
@@ -115,6 +116,7 @@ executable demod-note
   hs-source-dirs:     app
   default-language:   Haskell2010
   ghc-options:        -threaded -rtsopts -O2 -with-rtsopts=-N
+  other-modules:      Paths_DeMoD_Note
   build-depends:      DeMoD-Note, base, optparse-applicative, katip, async, stm, text
 
 executable demod
@@ -122,7 +124,9 @@ executable demod
   hs-source-dirs:     src/DeMoDNote
   default-language:   Haskell2010
   ghc-options:        -threaded -rtsopts -O2 -with-rtsopts=-N
+  other-modules:      Paths_DeMoD_Note
   build-depends:
+    , DeMoD-Note
     , base
     , brick                >= 2.0
     , vty                  >=6.0 && <7.0
