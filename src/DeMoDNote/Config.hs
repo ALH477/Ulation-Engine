@@ -171,9 +171,79 @@ onsetCodec = OnsetConfig
   <*> Toml.bool "quantize" .= quantize
 
 loadConfig :: Maybe FilePath -> IO Config
-loadConfig Nothing = pure defaultConfig
+loadConfig Nothing  = pure defaultConfig
 loadConfig (Just p) = do
   result <- Toml.decodeFileExact configCodec p
   case result of
     Left errs -> throwIO $ ConfigParseError (show errs)
-    Right cfg -> pure cfg
+    Right cfg -> case validateConfig cfg of
+      Left err  -> throwIO $ ConfigValidationError err
+      Right cfg' -> pure cfg'
+
+-- | Validate a decoded Config, returning either an error message or the
+-- (possibly clamped/normalised) config.  Catches the most dangerous values
+-- that would cause silent failures downstream.
+validateConfig :: Config -> Either String Config
+validateConfig cfg = do
+  let det  = detection cfg
+      tim  = timing    cfg
+      rt'  = rt        cfg
+      ons  = onset     cfg
+
+  -- DetectionConfig
+  requirePositive "detection.window"       (windowSize det)
+  requirePositive "detection.hop"          (hopSize    det)
+  requireRange    "detection.maxPolyphony" (maxPolyphony det) 1 16
+  requireRange    "detection.onsetThreshDb" (onsetThresh det) (-120.0) 0.0
+  requirePositive "detection.fastValidationMs" (fastValidationMs det)
+  requirePositive "detection.bassFastMs"   (bassFastMs   det)
+  requirePositive "detection.bassConfirmMs" (bassConfirmMs det)
+  requireRange    "detection.pitchBendRange" (pitchBendRange det) 0.0 24.0
+
+  -- TimingConfig
+  requireElem "timing.sampleRate" (sampleRate tim) [22050, 44100, 48000, 88200, 96000]
+  requirePositive "timing.bufferSize"  (bufferSize tim)
+  requirePositive "timing.maxJitterUs" (maxJitterUs tim)
+
+  -- RTConfig
+  requireRange "rt.priorityAudio"  (priorityAudio  rt') 1 99
+  requireRange "rt.priorityDetect" (priorityDetect rt') 1 99
+  requireRange "rt.cpuCore"        (cpuCore rt') 0 255
+
+  -- OnsetConfig — weights must be non-negative and sum to > 0
+  requireNonNeg "onset.spectralWeight" (spectralWeight ons)
+  requireNonNeg "onset.energyWeight"   (energyWeight   ons)
+  requireNonNeg "onset.phaseWeight"    (phaseWeight    ons)
+  let wsum = spectralWeight ons + energyWeight ons + phaseWeight ons
+  when (wsum <= 0) $ Left "onset weights must sum to > 0"
+  requireRange "onset.threshold" (threshold ons) 0.0 1.0
+
+  -- Port numbers
+  requireRange "osc.port"     (oscPort     cfg) 1024 65535
+  requireRange "monitor.port" (monitorPort cfg) 1024 65535
+
+  Right cfg
+  where
+    requirePositive :: (Ord a, Num a, Show a) => String -> a -> Either String ()
+    requirePositive field v
+      | v > 0    = Right ()
+      | otherwise = Left $ field ++ " must be > 0, got " ++ show v
+
+    requireNonNeg :: (Ord a, Num a, Show a) => String -> a -> Either String ()
+    requireNonNeg field v
+      | v >= 0   = Right ()
+      | otherwise = Left $ field ++ " must be >= 0, got " ++ show v
+
+    requireRange :: (Ord a, Show a) => String -> a -> a -> a -> Either String ()
+    requireRange field v lo hi
+      | v >= lo && v <= hi = Right ()
+      | otherwise = Left $ field ++ " must be in [" ++ show lo ++ ", " ++ show hi ++ "], got " ++ show v
+
+    requireElem :: (Eq a, Show a) => String -> a -> [a] -> Either String ()
+    requireElem field v allowed
+      | v `elem` allowed = Right ()
+      | otherwise = Left $ field ++ " must be one of " ++ show allowed ++ ", got " ++ show v
+
+    when :: Bool -> Either String () -> Either String ()
+    when True  e = e
+    when False _ = Right ()

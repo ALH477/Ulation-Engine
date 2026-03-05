@@ -44,11 +44,7 @@ import Data.Word (Word64)
 import Data.List (sort)
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import Control.Concurrent.STM (TVar, newTVarIO, readTVar, writeTVar, atomically)
-
--- Safe tail - returns empty list for empty input
-safeTail :: [a] -> [a]
-safeTail [] = []
-safeTail (_:xs) = xs
+import DeMoDNote.Util (safeTail)
 
 -- BPM ranges
 defaultBPM :: Double
@@ -220,32 +216,33 @@ quantizeToGrid state time = do
     grid <- atomically $ readTVar (quantization state)
     if grid == QOff
        then return time
-       else let bpm = targetBPM state
-                beatMs = 60000.0 / bpm
-                gridMs = beatMs * getGridDivision grid
-                timeMs = fromIntegral time / 1000.0 :: Double
-                gridTime = fromIntegral (round (timeMs / gridMs :: Double) :: Int) * gridMs :: Double
-            in return $ round (gridTime * 1000 :: Double) :: IO Word64
+       else do
+           bpm <- atomically $ readTVar (currentBPM state)   -- live BPM, not stale targetBPM
+           let beatMs  = 60000.0 / bpm
+               gridMs  = beatMs * getGridDivision grid
+               timeMs  = fromIntegral time / 1000.0 :: Double
+               gridTime = fromIntegral (round (timeMs / gridMs :: Double) :: Int) * gridMs :: Double
+           return $ round (gridTime * 1000 :: Double)
 
 -- Quantize a note onset to the beat grid
 quantizeNoteOnset :: BPMState -> Word64 -> IO Word64
 quantizeNoteOnset state onsetTime = do
-    let bpm = targetBPM state
-        beatMs = 60000.0 / bpm
-    ts <- atomically $ readTVar (timeSignature state)
+    bpm  <- atomically $ readTVar (currentBPM state)   -- live BPM
+    ts   <- atomically $ readTVar (timeSignature state)
     grid <- atomically $ readTVar (quantization state)
-    let start = startTime state
-        elapsed = onsetTime - start
-        elapsedMs = fromIntegral elapsed / 1000.0
-        beatPos = elapsedMs / beatMs
-        measureLen = fromIntegral (tsBeats ts)
+    let beatMs      = 60000.0 / bpm
+        start       = startTime state
+        elapsed     = onsetTime - start
+        elapsedMs   = fromIntegral elapsed / 1000.0
+        beatPos     = elapsedMs / beatMs
+        measureLen  = fromIntegral (tsBeats ts)
         posInMeasure = beatPos `mod'` measureLen
-        division = getGridDivision grid
+        division    = getGridDivision grid
     if division == 0
        then return onsetTime
        else let quantizedPos = fromIntegral (round (posInMeasure / division :: Double) :: Int) * division :: Double
-                offsetMs = (quantizedPos - posInMeasure) * beatMs
-            in return $ onsetTime + round (offsetMs * 1000 :: Double) :: IO Word64
+                offsetMs     = (quantizedPos - posInMeasure) * beatMs
+            in return $ onsetTime + round (offsetMs * 1000 :: Double)
 
 -- Get current beat position
 getBeatPosition :: BPMState -> IO Double
@@ -312,13 +309,14 @@ swingOffset state beatNum = do
        then 0.0
        else swingAmt * 0.5  -- Delay odd beats for swing feel
 
--- Convert milliseconds to samples at 96kHz
-msToSamples :: Double -> Int
-msToSamples ms = round (ms * 96.0)  -- 96 samples per ms at 96kHz
+-- | Convert milliseconds to sample frames at the given sample rate.
+-- e.g. msToSamples 44100 10.0 = 441
+msToSamples :: Int -> Double -> Int
+msToSamples sr ms = round (ms * fromIntegral sr / 1000.0)
 
--- Convert samples to milliseconds at 96kHz
-samplesToMs :: Int -> Double
-samplesToMs samples = fromIntegral samples / 96.0
+-- | Convert sample frames back to milliseconds at the given sample rate.
+samplesToMs :: Int -> Int -> Double
+samplesToMs sr samples = fromIntegral samples * 1000.0 / fromIntegral sr
 
 -- Convert beat number to milliseconds
 beatToMs :: Double -> Double -> Double

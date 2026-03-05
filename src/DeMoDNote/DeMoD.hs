@@ -22,16 +22,16 @@ import Brick.BChan                (newBChan, writeBChan)
 import Brick.Widgets.Center       (center)
 import qualified Graphics.Vty          as V
 import Graphics.Vty.CrossPlatform (mkVty)
-import Data.Bits                  ((.&.))
 import Control.Concurrent         (forkIO, threadDelay)
 import Control.Monad              (forever, void)
 import Control.Exception          (SomeException, try)
-import Data.Time                  (getCurrentTime, UTCTime(..), timeToTimeOfDay, TimeOfDay(..))
+import Data.Time                  (getCurrentTime)
 import System.Process             (createProcess, proc, std_out, std_err, StdStream(..),
                                    ProcessHandle, terminateProcess, waitForProcess)
 import System.Environment         (getArgs)
 import System.IO                  (hPutStrLn, stderr)
 import Paths_DeMoD_Note           (getDataFileName)
+import DeMoDNote.Intro
 
 -- ────────────────────────────────────────────────────────────────
 -- CLI args
@@ -39,15 +39,16 @@ import Paths_DeMoD_Note           (getDataFileName)
 
 data AudioConfig = AudioDefault | AudioFile FilePath | AudioOff deriving Show
 
-data Config = Config { cfgAudio :: AudioConfig } deriving Show
+-- Renamed from 'Config' to avoid shadowing DeMoDNote.Config.Config
+data CLIConfig = CLIConfig { cfgAudio :: AudioConfig } deriving Show
 
-parseArgs :: [String] -> Config
-parseArgs args = Config { cfgAudio = go args }
+parseArgs :: [String] -> CLIConfig
+parseArgs args = CLIConfig { cfgAudio = go args }
   where
-    go ("--no-audio" : rest) = AudioOff
-    go ("--audio" : path : _) = AudioFile path
-    go (_ : rest)             = go rest
-    go []                     = AudioDefault  -- play intro.mp3 by default
+    go ("--no-audio" : _)      = AudioOff
+    go ("--audio" : path : _)  = AudioFile path
+    go (_ : rest)              = go rest
+    go []                      = AudioDefault  -- play intro.mp3 by default
 
 -- ────────────────────────────────────────────────────────────────
 -- Events & State
@@ -70,71 +71,6 @@ data St = St
   , triDepth   :: Int     -- depth derived from time
   , timeLabel  :: String  -- HH:MM:SS used as seed label
   }
-
--- ────────────────────────────────────────────────────────────────
--- Sierpinski — Pascal's triangle mod 2
--- Row r, col c is filled iff (r .&. c) == c   (Data.Bits)
--- depth d → 2^d rows, centred in 80 cols
--- ────────────────────────────────────────────────────────────────
-
-renderSierpinski :: Int -> Char -> [String]
-renderSierpinski depth fillChar =
-  let size = 2 ^ depth
-      pad  = max 0 ((80 - (2 * size - 1)) `div` 2)
-      padS = replicate pad ' '
-  in [ padS ++ buildRow size r fillChar | r <- [0 .. size - 1] ]
-
-buildRow :: Int -> Int -> Char -> String
-buildRow size r fillChar =
-  [ cell r c | c <- [0 .. 2 * size - 2] ]
-  where
-    cell row col =
-      let k = col - (size - 1 - row)
-      in if k >= 0 && k <= row && (row .&. k) == k then fillChar else ' '
-
--- ────────────────────────────────────────────────────────────────
--- ASCII banners
--- ────────────────────────────────────────────────────────────────
-
-presentsLines :: [String]
-presentsLines =
-  [ "░███████              ░███     ░███            ░███████      ░██         ░██           ░██████  "
-  , "░██   ░██             ░████   ░████            ░██   ░██     ░██         ░██          ░██   ░██ "
-  , "░██    ░██  ░███████  ░██░██ ░██░██  ░███████  ░██    ░██    ░██         ░██         ░██        "
-  , "░██    ░██ ░██    ░██ ░██ ░████ ░██ ░██    ░██ ░██    ░██    ░██         ░██         ░██        "
-  , "░██    ░██ ░█████████ ░██  ░██  ░██ ░██    ░██ ░██    ░██    ░██         ░██         ░██        "
-  , "░██   ░██  ░██        ░██       ░██ ░██    ░██ ░██   ░██     ░██         ░██          ░██   ░██ "
-  , "░███████    ░███████  ░██       ░██  ░███████  ░███████      ░██████████ ░██████████   ░██████  "
-  , "                                                                                                "
-  , "                                                                                                "
-  , "                                                                                                "
-  , "              p r e s e n t s"
-  ]
-
-presentsText :: String
-presentsText = unlines presentsLines
-
-presentsLength :: Int
-presentsLength = length presentsText
-
--- Dynamic width — no hardcoded magic numbers
-presentsWidth :: Int
-presentsWidth = if null presentsLines then 0 else maximum (map length presentsLines)
-
--- ────────────────────────────────────────────────────────────────
--- "Astart" banner
--- ────────────────────────────────────────────────────────────────
-
-astartLines :: [String]
-astartLines =
-  [ "   ░███                  ░██                           ░██    "
-  , "  ░██░██                 ░██                           ░██    "
-  , " ░██  ░██   ░███████  ░████████  ░██████   ░██░████ ░████████ "
-  , "░█████████ ░██           ░██          ░██  ░███        ░██    "
-  , "░██    ░██  ░███████     ░██     ░███████  ░██         ░██    "
-  , "░██    ░██        ░██    ░██    ░██   ░██  ░██         ░██    "
-  , "░██    ░██  ░███████      ░████  ░█████░██ ░██          ░████ "
-  ]
 
 -- ────────────────────────────────────────────────────────────────
 -- Timing
@@ -264,25 +200,6 @@ app = App
   , appStartEvent   = pure ()
   , appAttrMap      = const theMap
   }
-
--- ────────────────────────────────────────────────────────────────
--- Time seeding
--- depth = 3 + ((h + m + s) mod 4)  →  depth 3..6
--- fillChar cycles through block chars based on seconds
--- ────────────────────────────────────────────────────────────────
-
-timeToDepthAndChar :: UTCTime -> (Int, Char, String)
-timeToDepthAndChar utc =
-  let tod   = timeToTimeOfDay (utctDayTime utc)
-      h     = todHour tod
-      m     = todMin  tod
-      s     = floor (todSec tod) :: Int
-      depth = 3 + ((h + m + s) `mod` 4)
-      ch    = "█▓▒░" !! (s `mod` 4)
-      label = pad2 h ++ ":" ++ pad2 m ++ ":" ++ pad2 s
-  in (depth, ch, label)
-  where
-    pad2 n = (if n < 10 then "0" else "") ++ show n
 
 -- ────────────────────────────────────────────────────────────────
 -- Audio playback

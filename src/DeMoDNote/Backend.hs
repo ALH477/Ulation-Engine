@@ -563,7 +563,11 @@ runBackend cfg state mSynthManager = do
             Just sm -> void $ try @SomeException $ stopFluidSynth sm
         ) Nothing
     
-    forkIO $ jackLoop cfg audioState jackState state
+    forkIO $ forever $
+        jackLoop cfg audioState jackState state
+            `catch` (\(e :: SomeException) -> do
+                logErr $ "jackLoop crashed: " ++ show e
+                threadDelay 1_000_000)
     
     logInfo "DeMoD-Note JACK backend started successfully."
     

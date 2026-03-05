@@ -26,9 +26,9 @@ module DeMoDNote.SoundFont (
     reloadSoundFont
 ) where
 
-import System.Directory (doesFileExist, getHomeDirectory, listDirectory, createDirectoryIfMissing, getFileSize)
+import System.Directory (doesFileExist, doesDirectoryExist, getHomeDirectory, listDirectory, createDirectoryIfMissing, getFileSize)
 import System.FilePath ((</>), takeFileName, takeExtension)
-import System.Process (ProcessHandle, terminateProcess, getProcessExitCode, spawnCommand)
+import System.Process (ProcessHandle, terminateProcess, getProcessExitCode, spawnProcess)
 
 -- import Control.Concurrent (threadDelay)  -- Kept for future use
 -- import Control.Monad (filterM, when)  -- Kept for future use
@@ -162,7 +162,7 @@ listSoundFonts manager = do
     mapM pathToInfo allPaths
     where
         listDirSFs dir = do
-            exists <- doesFileExist dir  -- Actually should use doesDirectoryExist
+            exists <- doesDirectoryExist dir
             if not exists
             then return []
             else do
@@ -231,17 +231,18 @@ sendMidiProgramChange _manager program bank = do
 startFluidSynth :: SoundFontManager -> FilePath -> IO SoundFontManager
 startFluidSynth manager soundfontPath = do
     let port = sfmFluidSynthPort manager
-        cmd = "fluidsynth"
+        cmd  = "fluidsynth"
+        -- Pass args directly to spawnProcess (not via shell) so paths with
+        -- spaces are handled correctly.
         args = ["-a", "jack", "-m", "jack", "-g", "0.8", "-p", "DeMoDNote", soundfontPath]
-    
+
     putStrLn $ "Starting FluidSynth with: " ++ soundfontPath
-    -- Spawn the process in background
-    ph <- spawnCommand (unwords $ cmd : args)
-    return $ manager {
-        sfmFluidSynthProcess = Just ph,
-        sfmFluidSynthPort = port,
-        sfmCurrentSoundFont = Just $ SoundFont soundfontPath (takeFileName soundfontPath) 0 True [0..127]
-    }
+    ph <- spawnProcess cmd args
+    return $ manager
+        { sfmFluidSynthProcess = Just ph
+        , sfmFluidSynthPort    = port
+        , sfmCurrentSoundFont  = Just $ SoundFont soundfontPath (takeFileName soundfontPath) 0 True [0..127]
+        }
 
 -- Stop FluidSynth
 stopFluidSynth :: SoundFontManager -> IO SoundFontManager

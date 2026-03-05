@@ -34,17 +34,13 @@ module DeMoDNote.Scale (
 
 
 
+import DeMoDNote.Util (safeIndex)
+
 -- MIDI note numbers: 0-127
 -- C4 = 60
 
 data NoteName = C | Cs | D | Ds | E | F | Fs | G | Gs | A | As | B
     deriving (Eq, Show, Enum, Ord)
-
-safeIndex :: [a] -> Int -> a -> a
-safeIndex [] _ def = def
-safeIndex _ n def | n < 0 = def
-safeIndex (x:_) 0 _ = x
-safeIndex (_:xs) n def = safeIndex xs (n - 1) def
 
 -- Scale intervals in semitones from root
 type ScaleIntervals = [Int]
@@ -151,6 +147,15 @@ aeolianIntervals = [0, 2, 3, 5, 7, 8, 10]
 locrianIntervals :: ScaleIntervals
 locrianIntervals = [0, 1, 3, 5, 6, 8, 10]
 
+wholeToneIntervals :: ScaleIntervals
+wholeToneIntervals = [0, 2, 4, 6, 8, 10]
+
+diminishedIntervals :: ScaleIntervals
+diminishedIntervals = [0, 2, 3, 5, 6, 8, 9, 11]
+
+augmentedIntervals :: ScaleIntervals
+augmentedIntervals = [0, 3, 4, 7, 8, 11]
+
 -- Get intervals for a scale type
 getIntervals :: ScaleType -> ScaleIntervals
 getIntervals Major = majorIntervals
@@ -167,8 +172,10 @@ getIntervals Lydian = lydianIntervals
 getIntervals Mixolydian = mixolydianIntervals
 getIntervals Aeolian = aeolianIntervals
 getIntervals Locrian = locrianIntervals
+getIntervals WholeTone = wholeToneIntervals
+getIntervals Diminished = diminishedIntervals
+getIntervals Augmented = augmentedIntervals
 getIntervals (Custom _ intervals) = intervals
-getIntervals _ = majorIntervals  -- Default
 
 -- Get scale name
 getScaleTypeName :: ScaleType -> String

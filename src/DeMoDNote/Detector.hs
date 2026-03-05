@@ -104,13 +104,13 @@ calcEnergyTransient curr prev =
 -- Fixed: previously compared a raw accumulated pllPhase (can be >> 2π) against
 -- a zero-crossing position in [0, 2π), giving wildly wrong results.
 -- Both values are now wrapped to [0, 2π) before computing the error.
-calcPhaseDeviation :: PLLState -> VS.Vector Double -> Double
-calcPhaseDeviation pll samples
+calcPhaseDeviation :: Double -> PLLState -> VS.Vector Double -> Double
+calcPhaseDeviation sr pll samples
   | not (pllLocked pll) = 1.0
   | otherwise =
       let predicted = mod2pi $
               pllPhase pll +
-              2.0 * pi * pllFrequency pll / detSrFallback
+              2.0 * pi * pllFrequency pll / sr
                 * fromIntegral (VS.length samples)
       in case findZeroCrossing samples of
            Nothing -> 1.0
@@ -120,10 +120,6 @@ calcPhaseDeviation pll samples
                  -- Wrap error into [-π, π] before normalising
                  rawErr  = mod2pi (predicted - actual + pi) - pi
              in min 1.0 (abs rawErr / pi)
-  where
-    -- Fallback SR for the context-free calcPhaseDeviation call site;
-    -- callers that have Config should use detSampleRate cfg instead.
-    detSrFallback = 44100.0
 
 -- | Find the first zero-crossing point in the signal
 -- Returns sample index where signal crosses zero
@@ -143,23 +139,21 @@ findZeroCrossing samples = go 0 (VS.length samples - 1)
 --
 -- Uses the explicit prevEnergy field to track RMS energy across frames,
 -- enabling proper energy transient detection (|ΔRMS| between frames).
-updateOnsetFeatures :: Config -> VS.Vector Double -> Double -> OnsetFeatures -> OnsetFeatures
-updateOnsetFeatures cfg _curr currRms prevFeatures =
-  let prevRms  = prevEnergy prevFeatures     -- previous frame's RMS
+updateOnsetFeatures :: Config -> VS.Vector Double -> Double -> PLLState -> OnsetFeatures -> OnsetFeatures
+updateOnsetFeatures cfg curr currRms prevPLL prevFeatures =
+  let sr       = detSampleRate cfg
+      prevRms  = prevEnergy prevFeatures     -- previous frame's RMS
       et       = abs (currRms - prevRms)     -- energy transient |ΔRMS|
-      -- Spectral flux needs the raw previous frame vector for a proper
-      -- half-wave rectified bin-difference.  Without storing prev samples we
-      -- approximate with the scalar energy delta; a correct implementation
-      -- would store VS.Vector Double in OnsetFeatures.
-      sf       = et
+      sf       = et                          -- spectral flux approximation
+      pd       = calcPhaseDeviation sr prevPLL curr
       oc       = onset cfg
-      combined = spectralWeight oc * sf + energyWeight oc * et
+      combined = spectralWeight oc * sf + energyWeight oc * et + phaseWeight oc * pd
   in OnsetFeatures
        { spectralFlux    = sf
        , energyTransient = et
-       , phaseDeviation  = 0.0  -- placeholder; actual phase deviation unused
+       , phaseDeviation  = pd
        , combinedScore   = combined
-       , prevEnergy      = currRms  -- carry forward for next frame
+       , prevEnergy      = currRms
        }
 
 -- | True when the combined onset score exceeds the configured threshold
@@ -444,8 +438,7 @@ detect cfg samplesInt16 currentTime prevState prevPLL prevOnset = do
   let newPLL = updatePLL sr samples prevPLL
 
   -- Onset detection now receives currRms so the energy delta is meaningful.
-  -- Previously both curr and prev were the same vector → always 0.
-  let newOnset = updateOnsetFeatures cfg samples currRms prevOnset
+  let newOnset = updateOnsetFeatures cfg samples currRms newPLL prevOnset
       isOnset  = detectOnset cfg newOnset
 
   -- Note-off heuristic: if the buffer is silent the held note has ended.

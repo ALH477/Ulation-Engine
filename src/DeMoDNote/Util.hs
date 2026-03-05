@@ -1,11 +1,11 @@
 module DeMoDNote.Util (
     safeIndex,
     safeTail,
+    safeInit,
     clamp,
     chunksOf,
     safeMinimumBy,
     safeMaximumBy,
-    clampBounded,
     padCenter,
     padLeft,
     padRight
@@ -21,11 +21,13 @@ safeTail :: [a] -> [a]
 safeTail [] = []
 safeTail (_:xs) = xs
 
+safeInit :: [a] -> [a]
+safeInit [] = []
+safeInit [_] = []
+safeInit xs = init xs
+
 clamp :: Ord a => a -> a -> a -> a
 clamp lo hi = max lo . min hi
-
-clampBounded :: (Ord a, Bounded a) => a -> a -> a -> a
-clampBounded lo hi = max lo . min hi
 
 chunksOf :: Int -> [a] -> [[a]]
 chunksOf _ [] = []

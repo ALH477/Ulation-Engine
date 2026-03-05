@@ -339,7 +339,9 @@ writeJsonFile session path = BSL.writeFile path (sessionToJson session)
 sessionToMusicXml :: MusicXmlConfig -> Session -> BSL.ByteString
 sessionToMusicXml config session =
     let noteGroups = groupNoteEvents (events session)
-    in BB.toLazyByteString $ buildMusicXml config noteGroups
+        -- Default 120 BPM; a richer implementation would parse tempo from events.
+        bpm = 120 :: Int
+    in BB.toLazyByteString $ buildMusicXml config bpm noteGroups
 
 -- | Write MusicXML file to disk
 writeMusicXmlFile :: MusicXmlConfig -> Session -> FilePath -> IO ()
@@ -366,51 +368,57 @@ groupNoteEvents evts = go (sortOn timestamp evts) []
         | otherwise = findNoteOff n es
 
 -- | Build MusicXML document
-buildMusicXml :: MusicXmlConfig -> [(RecordedEvent, Maybe RecordedEvent)] -> BB.Builder
-buildMusicXml MusicXmlConfig{..} notes =
+buildMusicXml :: MusicXmlConfig -> Int -> [(RecordedEvent, Maybe RecordedEvent)] -> BB.Builder
+buildMusicXml MusicXmlConfig{..} bpm notes =
     BB.string7 "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" <>
     BB.string7 "<!DOCTYPE score-partwise PUBLIC \"-//Recordare//DTD MusicXML 4.0//EN\" \"http://www.musicxml.org/dtds/partwise.dtd\">\n" <>
     BB.string7 "<score-partwise version=\"4.0\">\n" <>
     BB.string7 "  <work><work-title>" <> BB.string7 xmlTitle <> BB.string7 "</work-title></work>\n" <>
-    (if null xmlComposer 
-     then mempty 
-     else BB.string7 "  <identification><creator type=\"composer\">" <> 
+    (if null xmlComposer
+     then mempty
+     else BB.string7 "  <identification><creator type=\"composer\">" <>
           BB.string7 xmlComposer <> BB.string7 "</creator></identification>\n") <>
     BB.string7 "  <part-list>\n" <>
     BB.string7 "    <score-part id=\"P1\"><part-name>" <> BB.string7 xmlInstrument <> BB.string7 "</part-name></score-part>\n" <>
     BB.string7 "  </part-list>\n" <>
     BB.string7 "  <part id=\"P1\">\n" <>
-    buildMeasure 1 notes <>
+    buildMeasure 1 bpm notes <>
     BB.string7 "  </part>\n" <>
     BB.string7 "</score-partwise>\n"
 
 -- | Build a single measure
-buildMeasure :: Int -> [(RecordedEvent, Maybe RecordedEvent)] -> BB.Builder
-buildMeasure num notes =
+buildMeasure :: Int -> Int -> [(RecordedEvent, Maybe RecordedEvent)] -> BB.Builder
+buildMeasure num bpm notes =
     BB.string7 "    <measure number=\"" <> BB.string7 (show num) <> BB.string7 "\">\n" <>
     BB.string7 "      <attributes>\n" <>
     BB.string7 "        <divisions>480</divisions>\n" <>
     BB.string7 "        <time><beats>4</beats><beat-type>4</beat-type></time>\n" <>
     BB.string7 "        <clef><sign>G</sign><line>2</line></clef>\n" <>
     BB.string7 "      </attributes>\n" <>
-    mconcat (map buildNote notes) <>
+    mconcat (map (buildNote bpm) notes) <>
     BB.string7 "    </measure>\n"
 
 -- | Build a single note element
-buildNote :: (RecordedEvent, Maybe RecordedEvent) -> BB.Builder
-buildNote (onEvt, mOffEvt) =
+-- divisions = 480 ticks per quarter note (declared in <divisions>).
+-- duration_us * bpm / 60_000_000 gives duration in quarter notes;
+-- multiply by 480 to get ticks.
+buildNote :: Int -> (RecordedEvent, Maybe RecordedEvent) -> BB.Builder
+buildNote bpm (onEvt, mOffEvt) =
     let midiNote = fromIntegral (note onEvt) :: Int
         (step, alter, octave) = midiToMusicXmlPitch midiNote
-        duration = case mOffEvt of
+        durationUs = case mOffEvt of
             Just off -> timestamp off - timestamp onEvt
-            Nothing -> 480000  -- Default quarter note
-        
-        -- Convert microseconds to divisions (simplified)
-        divisions = min 1920 (duration `div` 10000)  -- Cap at half note
+            Nothing  -> 500000  -- Default: half a second (~quarter note @ 120 BPM)
+        -- Convert microseconds → MusicXML ticks at 480 PPQ
+        -- ticks = duration_us * bpm * 480 / 60_000_000
+        ticksRaw  = fromIntegral durationUs * fromIntegral bpm * 480
+                    `div` (60000000 :: Word64)
+        -- Clamp: minimum 1 tick (grace note floor), maximum 1920 (whole note)
+        divisions = fromIntegral (max 1 (min 1920 ticksRaw)) :: Word64
     in BB.string7 "      <note>\n" <>
        BB.string7 "        <pitch>\n" <>
        BB.string7 "          <step>" <> BB.string7 [step] <> BB.string7 "</step>\n" <>
-       (if alter > 0 
+       (if alter > 0
         then BB.string7 "          <alter>" <> BB.string7 (show alter) <> BB.string7 "</alter>\n"
         else mempty) <>
        BB.string7 "          <octave>" <> BB.string7 (show octave) <> BB.string7 "</octave>\n" <>

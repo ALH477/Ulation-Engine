@@ -24,6 +24,7 @@ import Data.Time.Clock.POSIX (getPOSIXTime)
 import DeMoDNote.Types
 import DeMoDNote.Config hiding (defaultConfig)
 import DeMoDNote.Backend (DetectionEvent(..), JackStatus(..))
+import DeMoDNote.Util (safeIndex, safeTail, clamp, chunksOf)
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Configuration constants
@@ -56,24 +57,8 @@ maxNoteHistory :: Int
 maxNoteHistory = 10
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- Utilities
+-- Utilities  (safeIndex, safeTail, clamp, chunksOf imported from DeMoDNote.Util)
 -- ─────────────────────────────────────────────────────────────────────────────
-
-safeIndex :: [a] -> Int -> a -> a
-safeIndex []     _ d = d
-safeIndex (x:_)  0 _ = x
-safeIndex (_:xs) n d = safeIndex xs (n - 1) d
-
-safeTail :: [a] -> [a]
-safeTail []     = []
-safeTail (_:xs) = xs
-
-chunksOf :: Int -> [a] -> [[a]]
-chunksOf _ [] = []
-chunksOf n xs = take n xs : chunksOf n (drop n xs)
-
-clamp :: Ord a => a -> a -> a -> a
-clamp lo hi = max lo . min hi
 
 -- "BPM" → "B P M"  (retro digital-display aesthetic)
 spaced :: String -> String
@@ -1401,7 +1386,7 @@ runTUIWithState cfg stateVar = do
                     , noteStateMach       rs
                     , jackStatus          rs
                     , detectionConfidence rs
-                    , take 8 (latestWaveform rs)
+                    , take 64 (latestWaveform rs)
                     )
         when (prev /= Just key) $ do
             writeIORef prevRef (Just key)

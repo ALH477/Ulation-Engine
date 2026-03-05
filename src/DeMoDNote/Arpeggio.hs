@@ -39,13 +39,18 @@ module DeMoDNote.Arpeggio (
     -- Utility
     chordToNotes,
     arpeggiateChord,
-    allArpeggioPatterns
+    allArpeggioPatterns,
+    -- IO helpers
+    applyPatternIO,
+    shuffleIO
 ) where
 
 import DeMoDNote.Scale (NoteName(..), noteNameToMidi, Scale(..), ScaleType(..))
+import DeMoDNote.Util (safeInit, safeTail)
 import System.Random (randomRIO)
 
 -- Safe list indexing - returns Nothing if index out of bounds
+-- (different signature from DeMoDNote.Util.safeIndex, which requires a default)
 safeIndex :: [a] -> Int -> Maybe a
 safeIndex [] _ = Nothing
 safeIndex (x:_) 0 = Just x
@@ -54,19 +59,8 @@ safeIndex (_:xs) n = safeIndex xs (n - 1)
 -- Safe list indexing with default value
 safeIndexDef :: a -> [a] -> Int -> a
 safeIndexDef def xs n = case safeIndex xs n of
-    Just x -> x
+    Just x  -> x
     Nothing -> def
-
--- Safe init - returns empty list for empty input
-safeInit :: [a] -> [a]
-safeInit [] = []
-safeInit [_] = []
-safeInit xs = init xs
-
--- Safe tail - returns empty list for empty input
-safeTail :: [a] -> [a]
-safeTail [] = []
-safeTail (_:xs) = xs
 
 -- Chord qualities
 data ChordQuality = 
@@ -193,13 +187,13 @@ getArpeggioNotes arp startOctave =
         allNotes = concatMap (\o -> map (+ (base + o * 12)) intervals) [0..octaves-1]
     in applyPattern (arpPattern arp) allNotes
 
--- Apply pattern to note list
+-- Apply pattern to note list (pure patterns only; Random requires IO — see applyPatternIO)
 applyPattern :: ArpeggioPattern -> [Int] -> [Int]
 applyPattern Up notes = notes
 applyPattern Down notes = reverse notes
 applyPattern UpDown notes = notes ++ reverse (safeInit notes)
 applyPattern DownUp notes = reverse notes ++ safeTail notes
-applyPattern Random notes = notes  -- Will be shuffled at play time
+applyPattern Random notes = notes  -- order preserved; use applyPatternIO for shuffled output
 applyPattern Broken3 notes = 
     if null notes then []
     else take 12 $ concatMap (\i -> map (safeIndexDef 60 notes) [(i `mod` len), ((i+2) `mod` len), ((i+4) `mod` len)]) [0..]
@@ -231,16 +225,26 @@ applyPattern (CustomPattern _ indices) notes =
     if null notes then []
     else concatMap (map (safeIndexDef 60 notes)) indices
 
--- Generate Euclidean rhythm pattern
+-- Generate Euclidean rhythm pattern using the Bjorklund/Bresenham algorithm.
+-- euclideanPattern pulses steps produces a [Bool] of length `steps` with
+-- `pulses` True values distributed as evenly as possible.
+-- e.g. euclideanPattern 3 8 = [T,F,F,T,F,F,T,F]
 euclideanPattern :: Int -> Int -> [Bool]
-euclideanPattern pulses steps = 
-    let groups = replicate pulses [True] ++ replicate (steps - pulses) [False]
-    in concat $ distribute groups
-    where
-        distribute [x] = [x]
-        distribute xs = 
-            let (as, bs) = splitAt (length xs `div` 2) xs
-            in zipWith (++) as bs ++ drop (length as) bs
+euclideanPattern pulses steps
+    | steps <= 0  = []
+    | pulses <= 0 = replicate steps False
+    | pulses >= steps = replicate steps True
+    | otherwise   = bjorklund (replicate pulses [True]) (replicate (steps - pulses) [False])
+  where
+    bjorklund ones zeros
+        | length zeros <= 1 = concat ones ++ concat zeros
+        | otherwise =
+            let (paired, remainder) = if length ones <= length zeros
+                    then ( zipWith (++) ones zeros
+                         , drop (length ones) zeros )
+                    else ( zipWith (++) (take (length zeros) ones) zeros
+                         , drop (length zeros) ones )
+            in bjorklund paired remainder
 
 -- Get arpeggio with timing information (in milliseconds)
 getArpeggioWithRhythm :: Arpeggio -> Int -> [(Int, Double)]  -- [(Note, TimeOffsetMs)]
@@ -331,15 +335,20 @@ allArpeggioPatterns = [
     "walking-bass", "fingerpicking"
     ]
 
--- Shuffle for random pattern (IO) - currently unused but available for future use
-_shuffleIO :: [a] -> IO [a]
-_shuffleIO [] = return []
-_shuffleIO (x:[]) = return [x]
-_shuffleIO xs = do
+-- | Shuffle a list randomly (Fisher-Yates via randomRIO).
+shuffleIO :: [a] -> IO [a]
+shuffleIO []       = return []
+shuffleIO xs@[_]   = return xs
+shuffleIO xs = do
     i <- randomRIO (0, length xs - 1)
     let (left, right) = splitAt i xs
     case right of
-      [] -> _shuffleIO xs  -- Retry if we somehow got an empty right part
-      (x':right') -> do
-        rest <- _shuffleIO (left ++ right')
-        return $ x' : rest
+        []        -> shuffleIO xs  -- shouldn't happen; retry
+        (x:right') -> do
+            rest <- shuffleIO (left ++ right')
+            return (x : rest)
+
+-- | IO variant of applyPattern — handles 'Random' by actually shuffling.
+applyPatternIO :: ArpeggioPattern -> [Int] -> IO [Int]
+applyPatternIO Random notes = shuffleIO notes
+applyPatternIO p     notes  = return (applyPattern p notes)

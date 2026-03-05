@@ -54,10 +54,9 @@ import Foreign.C.String (withCString)
 import Control.Monad (when, unless, forever, forM_, void)
 import Control.Concurrent.STM (TVar, newTVarIO, readTVarIO, atomically, writeTVar)
 import Control.Concurrent (forkIO, forkOS, threadDelay, ThreadId)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef, unsafePerformIO)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef, modifyIORef')
 import Data.Time.Clock (getCurrentTime, diffUTCTime, UTCTime, utctDayTime)
 import Data.Time.Format (defaultTimeLocale, formatTime)
-import Data.Time.LocalTime (timeToTimeOfDay, TimeOfDay(..))
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BS8
 import System.Exit (exitSuccess, exitFailure)
@@ -145,80 +144,20 @@ astartDuration = 60    -- ~2 seconds
 fadeOutDuration :: Int
 fadeOutDuration = 30   -- ~1 second
 
--- =============================================================================
--- ASCII Banners
--- =============================================================================
-
-presentsLines :: [String]
-presentsLines =
-  [ "░███████              ░███     ░███            ░███████      ░██         ░██           ░██████  "
-  , "░██   ░██             ░████   ░████            ░██   ░██     ░██         ░██          ░██   ░██ "
-  , "░██    ░██  ░███████  ░██░██ ░██░██  ░███████  ░██    ░██    ░██         ░██         ░██        "
-  , "░██    ░██ ░██    ░██ ░██ ░████ ░██ ░██    ░██ ░██    ░██    ░██         ░██         ░██        "
-  , "░██    ░██ ░█████████ ░██  ░██  ░██ ░██    ░██ ░██    ░██    ░██         ░██         ░██        "
-  , "░██   ░██  ░██        ░██       ░██ ░██    ░██ ░██   ░██     ░██         ░██          ░██   ░██ "
-  , "░███████    ░███████  ░██       ░██  ░███████  ░███████      ░██████████ ░██████████   ░██████  "
-  , "                                                                                                "
-  , "                                                                                                "
-  , "                                                                                                "
-  , "              p r e s e n t s"
-  ]
-
-astartLines :: [String]
-astartLines =
-  [ "   ░███                  ░██                           ░██    "
-  , "  ░██░██                 ░██                           ░██    "
-  , " ░██  ░██   ░███████  ░████████  ░██████   ░██░████ ░████████ "
-  , "░█████████ ░██           ░██          ░██  ░███        ░██    "
-  , "░██    ░██  ░███████     ░██     ░███████  ░██         ░██    "
-  , "░██    ░██        ░██    ░██    ░██   ░██  ░██         ░██    "
-  , "░██    ░██  ░███████      ░████  ░█████░██ ░██          ░████ "
-  ]
-
--- =============================================================================
--- Sierpinski Triangle Generation
--- =============================================================================
-
-renderSierpinski :: Int -> Char -> [String]
-renderSierpinski depth fillChar =
-  let size = 2 ^ depth
-      pad  = max 0 ((80 - (2 * size - 1)) `div` 2)
-      padS = replicate pad ' '
-  in [ padS ++ buildSierpinskiRow size r fillChar | r <- [0 .. size - 1] ]
-
-buildSierpinskiRow :: Int -> Int -> Char -> String
-buildSierpinskiRow size r fillChar =
-  [ cell r c | c <- [0 .. 2 * size - 2] ]
-  where
-    cell row col =
-      let k = col - (size - 1 - row)
-      in if k >= 0 && k <= row && (row .&. k) == k then fillChar else ' '
-
-timeToDepthAndChar :: UTCTime -> (Int, Char, String)
-timeToDepthAndChar utc =
-  let tod   = timeToTimeOfDay (utctDayTime utc)
-      h     = todHour tod
-      m     = todMin  tod
-      s     = floor (todSec tod) :: Int
-      depth = 3 + ((h + m + s) `mod` 4)
-      ch    = "█▓▒░" !! (s `mod` 4)
-      label = pad2 h ++ ":" ++ pad2 m ++ ":" ++ pad2 s
-  in (depth, ch, label)
-  where
-    pad2 n = (if n < 10 then "0" else "") ++ show n
+-- Import shared intro assets (banners, Sierpiński renderer, timeToDepthAndChar)
+import DeMoDNote.Intro
 
 -- =============================================================================
 -- Audio Playback (Cross-platform with caching)
 -- =============================================================================
 
--- | Cache for the working audio player command
-cachedAudioPlayer :: IORef (Maybe (String, [String]))
-cachedAudioPlayer = unsafePerformIO $ newIORef Nothing
-{-# NOINLINE cachedAudioPlayer #-}
+-- Note: the working audio player command is cached per-AppState in
+-- asAudioPlayerCmd (IORef (Maybe (String, [String]))); see AppState below.
+-- This avoids module-level unsafePerformIO mutable state.
 
-spawnIntroAudio :: FilePath -> IO AudioPlayer
-spawnIntroAudio path = do
-  cached <- readIORef cachedAudioPlayer
+spawnIntroAudio :: IORef (Maybe (String, [String])) -> FilePath -> IO AudioPlayer
+spawnIntroAudio cacheRef path = do
+  cached <- readIORef cacheRef
   case cached of
     Just (cmd, args) -> do
       result <- try $ createProcess
@@ -226,14 +165,14 @@ spawnIntroAudio path = do
       case result of
         Right (_, _, _, ph) -> return (Player ph)
         Left (_ :: SomeException) -> do
-          writeIORef cachedAudioPlayer Nothing
-          spawnIntroAudio path
+          writeIORef cacheRef Nothing
+          spawnIntroAudio cacheRef path
     Nothing -> tryPlayers candidates
   where
     candidates =
-      [ ("mpg123",  ["-q"])  -- Linux standard
-      , ("afplay",  [])       -- macOS built-in
-      , ("mplayer", ["-really-quiet"])  -- fallback
+      [ ("mpg123",  ["-q"])
+      , ("afplay",  [])
+      , ("mplayer", ["-really-quiet"])
       ]
     tryPlayers [] = do
       putStrLn "[OpenGL] WARNING: no audio player found (mpg123/afplay/mplayer). Continuing without audio."
@@ -244,7 +183,7 @@ spawnIntroAudio path = do
       case result of
         Left  (_ :: SomeException) -> tryPlayers rest
         Right (_, _, _, ph)        -> do
-          writeIORef cachedAudioPlayer $ Just (cmd, args)
+          writeIORef cacheRef $ Just (cmd, args)
           return (Player ph)
 
 stopAudioPlayer :: AudioPlayer -> IO ()
@@ -1037,6 +976,7 @@ data AppState = AppState
   , asTriDepth       :: !Int
   , asTimeLabel      :: !String
   , asAudioPlayer    :: !(IORef AudioPlayer)
+  , asAudioPlayerCmd :: !(IORef (Maybe (String, [String])))  -- per-instance player cache
   }
 
 -- =============================================================================
@@ -1752,7 +1692,8 @@ runOpenGLVisualizer cfg reactorVar = do
   tuiTV <- newTVarIO VTY.emptyPicture
   introStateRef <- newIORef initIntroState
   skipIntroRef <- newIORef False
-  audioPlayerRef <- newIORef NoAudio
+  audioPlayerRef    <- newIORef NoAudio
+  audioPlayerCmdRef <- newIORef Nothing
 
   let colors = defaultLaneColors
       appState = AppState
@@ -1801,7 +1742,8 @@ runOpenGLVisualizer cfg reactorVar = do
         , asTriangle = triangle
         , asTriDepth = depth
         , asTimeLabel = timeLabel
-        , asAudioPlayer = audioPlayerRef
+        , asAudioPlayer    = audioPlayerRef
+        , asAudioPlayerCmd = audioPlayerCmdRef
         }
 
   GLFW.setKeyCallback win $ Just (keyCallback appState)
@@ -1823,7 +1765,7 @@ runOpenGLVisualizer cfg reactorVar = do
         introPath <- getDataFileName "assets/intro.mp3"
         exists <- doesFileExist introPath
         if exists 
-          then spawnIntroAudio introPath
+          then spawnIntroAudio audioPlayerCmdRef introPath
           else do
             putStrLn "[OpenGL] WARNING: intro.mp3 not found. Continuing without intro audio."
             return NoAudio

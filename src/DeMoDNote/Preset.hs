@@ -31,7 +31,7 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.List (sort, isPrefixOf, isSuffixOf, find)
 import Control.Monad (forM)
-import System.Directory (createDirectoryIfMissing, doesFileExist, getHomeDirectory, removeFile, listDirectory)
+import System.Directory (createDirectoryIfMissing, doesFileExist, doesDirectoryExist, getHomeDirectory, removeFile, listDirectory)
 import System.FilePath ((</>))
 import DeMoDNote.Config
 import DeMoDNote.Scale (Scale, ScaleType(..), NoteName(..), makeScale)
@@ -193,7 +193,7 @@ loadAllPresets :: IO PresetLibrary
 loadAllPresets = do
     let builtins = defaultPresets
     presetDir <- getPresetDir
-    dirExists <- doesFileExist presetDir
+    dirExists <- doesDirectoryExist presetDir
     if dirExists
         then do
             files <- listDirectory presetDir
@@ -246,21 +246,27 @@ loadPreset path = do
             Left err -> return $ Left $ "Parse error: " ++ err
             Right p -> return $ Right p
 
--- Simple parser that extracts preset name from TOML comment
+-- Simple parser that extracts preset name from TOML
 parseSimplePreset :: String -> Either String Preset
-parseSimplePreset content = 
+parseSimplePreset content =
     case nameLine of
         Nothing -> Left "Missing 'name' field in preset"
-        Just n -> Right $ defaultPreset { presetName = strip n }
+        Just n  -> Right $ defaultPreset { presetName = n }
   where
-    lines' = lines content
+    ls = lines content
     nameLine = do
-        l <- find (\line -> "name" `isPrefixOf` stripComments line) lines'
-        case break (== '=') l of
-            (_, rest) -> let val = strip rest in 
-                if null val then Nothing else Just val
+        -- Find the first line that starts with "name" (ignoring leading spaces)
+        l <- find (\line -> "name" `isPrefixOf` dropWhile (== ' ') (stripComments line)) ls
+        -- Split on '=' and strip the value of whitespace and optional TOML quotes
+        let val = strip (drop 1 (dropWhile (/= '=') l))
+        if null val then Nothing else Just val
     stripComments l = if '#' `elem` l then takeWhile (/= '#') l else l
-    strip s = dropWhile (== ' ') $ takeWhile (/= ' ') $ dropWhile (== ' ') $ dropWhile (/= ' ') s
+    -- Strip surrounding whitespace, then strip a single pair of double-quotes if present
+    strip s =
+        let s' = dropWhile (== ' ') (reverse (dropWhile (== ' ') (reverse s)))
+        in  case s' of
+                ('"':rest) -> takeWhile (/= '"') rest
+                _          -> s'
 
 -- Save preset to file (TOML)
 savePreset :: Preset -> FilePath -> IO ()
@@ -282,13 +288,13 @@ generatePresetTOML preset = unlines [
     "",
     "[scale]",
     case presetScale preset of
-        Just (root, sType) -> "root = " ++ show (show root) ++ "\ntype = " ++ show (show sType)
+        Just (root, sType) -> "root = \"" ++ show root ++ "\"\ntype = \"" ++ show sType ++ "\""
         Nothing -> "# No scale specified",
     "",
     "[bpm]",
     "tempo = " ++ show (presetBPM preset),
-    "mode = " ++ show (show $ presetBPMMode preset),
-    "quantization = " ++ show (show $ presetQuantization preset),
+    "mode = \"" ++ show (presetBPMMode preset) ++ "\"",
+    "quantization = \"" ++ show (presetQuantization preset) ++ "\"",
     "swing = " ++ show (presetSwing preset),
     "",
     "[soundfont]",

@@ -45,6 +45,7 @@ import Sound.Osc.Transport.Fd.Udp (Udp(..), with_udp, udpServer)
 import System.IO (hPutStrLn, stderr)
 
 import DeMoDNote.Preset
+import DeMoDNote.Config (Config)
 import DeMoDNote.Types
 
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -188,8 +189,12 @@ applyCommand state cmd = case cmd of
     LoadPreset name -> do
         mPreset <- getPresetByName name
         case mPreset of
-            Just _  -> putStrLn $ "OSC: Loaded preset: " ++ name
             Nothing -> putStrLn $ "OSC: Preset not found: " ++ name
+            Just p  -> do
+                atomically $ modifyTVar' state $ \s ->
+                    let newCfg = applyPreset p (config s)
+                    in  s { config = newCfg }
+                putStrLn $ "OSC: Loaded preset: " ++ name
     GetStatus -> return ()
     SetDebug _ -> return ()
 
