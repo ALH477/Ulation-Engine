@@ -1,12 +1,21 @@
 [Desktop Entry]
-Name=DeMoD-Note
+Categories=Audio;AudioVideo;Music;MIDI;Utility;
+Comment[en_US]=Deterministic Monophonic Note Detector
 Comment=Deterministic Monophonic Note Detector
 Comment[fr]=Détecteur de notes monophonique déterministe
 Exec=/home/asher/DeMoD-Note/desktop/DeMoD-Note.sh
+GenericName[en_US]=
+GenericName=
 Icon=../assets/DeMoD-Japan.png
-Terminal=true
-Type=Application
-Categories=Audio;AudioVideo;Music;MIDI;Utility;
 Keywords=audio;midi;note;detector;jack;osc;
+MimeType=
+Name[en_US]=DeMoD-Note
+Name=DeMoD-Note
+Path=
 StartupNotify=true
 StartupWMClass=DeMoD-Note
+Terminal=true
+TerminalOptions=
+Type=Application
+X-KDE-SubstituteUID=false
+X-KDE-Username=
